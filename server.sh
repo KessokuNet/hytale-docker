@@ -137,33 +137,64 @@ for cmd in "${BASE_STARTUP_CMDS[@]}"; do
     BOOT_COMMANDS+=("--boot-command" "${cmd}")
 done
 
+SERVER_COMMAND=(java)
+if [ -n "${EXTRA_JVM_ARGS}" ]; then
+    read -r -a EXTRA_JVM_SPLIT <<< "${EXTRA_JVM_ARGS}"
+    SERVER_COMMAND+=("${EXTRA_JVM_SPLIT[@]}")
+fi
+
+SERVER_COMMAND+=(
+    -jar "${SERVER_JAR_PATH}"
+    --assets "${ASSETS_PATH}"
+    --bind "${HYTALE_BIND}"
+    --auth-mode "${HYTALE_AUTH_MODE}"
+    --transport "${HYTALE_TRANSPORT}"
+    --backup-frequency "${HYTALE_BACKUP_FREQUENCY}"
+    --backup-max-count "${HYTALE_BACKUP_MAX_COUNT}"
+    --universe "${HYTALE_UNIVERSE}"
+    "${BOOT_COMMANDS[@]}"
+)
+
+if [ -n "${HYTALE_EXTRA_ARGS}" ]; then
+    read -r -a HYTALE_EXTRA_SPLIT <<< "${HYTALE_EXTRA_ARGS}"
+    SERVER_COMMAND+=("${HYTALE_EXTRA_SPLIT[@]}")
+fi
+
 
 cd "${HYTALE_DATA_DIR}"
 
-# Setup console multiplexing for telnet access
-# Create named pipes for bidirectional communication
-STDIN_FIFO="/tmp/hytale-stdin"
-rm -f "$STDIN_FIFO"
-mkfifo "$STDIN_FIFO"
+# Console mux using dtach: exposes a Unix socket and bridges to TCP for remote access
+DTACH_SOCKET="/tmp/hytale-console"
+JAVA_PID_FILE="/tmp/hytale-java.pid"
+rm -f "$DTACH_SOCKET" "$JAVA_PID_FILE"
 
-# Start socat for remote console access - creates PTY
-socat -d -d PTY,link=/tmp/hytale-pty,raw,echo=0 TCP-LISTEN:${CONSOLE_PORT},reuseaddr,fork &
-SOCAT_PID=$!
+DTACH_CMD=(dtach -n "$DTACH_SOCKET")
 
-# Give socat time to create the PTY
-sleep 1
+# Launch the server inside a dtach session and record the PID so signals work
+"${DTACH_CMD[@]}" sh -c 'echo $$ > /tmp/hytale-java.pid; exec "$@"' sh "${SERVER_COMMAND[@]}" &
+DTACH_SERVER_PID=$!
 
-# Start a dummy nc connection to keep the PTY alive
-nc localhost ${CONSOLE_PORT} > /dev/null 2>&1 &
-DUMMY_NC_PID=$!
+# Wait for the PID file to appear so we can signal the JVM directly
+for _ in {1..50}; do
+    if [ -s "$JAVA_PID_FILE" ]; then
+        JAVA_PID=$(cat "$JAVA_PID_FILE")
+        break
+    fi
+    sleep 0.1
+done
 
-# Bridge PTY input to stdin FIFO in background
-cat /tmp/hytale-pty > "$STDIN_FIFO" &
-PTY_READER_PID=$!
+if [ -z "$JAVA_PID" ]; then
+    echo "Failed to discover Java PID from dtach session; exiting"
+    exit 1
+fi
 
-# Start stdin cat in background
-cat < /dev/stdin > "$STDIN_FIFO" &
-STDIN_CAT_PID=$!
+# Attach a read-only follower so stdout still goes to container logs
+dtach -a "$DTACH_SOCKET" < /dev/null &
+DTACH_LOGGER_PID=$!
+
+# Bridge TCP console port to the dtach session
+socat -d -d TCP-LISTEN:${CONSOLE_PORT},reuseaddr,fork EXEC:"dtach -a ${DTACH_SOCKET}" &
+SOCKET_BRIDGE_PID=$!
 
 # Cleanup function
 CLEANED_UP=0
@@ -192,9 +223,9 @@ cleanup() {
         fi
     fi
 
-    # Kill all processes in this process group
+    kill $SOCKET_BRIDGE_PID $DTACH_LOGGER_PID $DTACH_SERVER_PID 2>/dev/null || true
     kill -- -$$ 2>/dev/null || true
-    rm -f /tmp/hytale-pty "$STDIN_FIFO"
+    rm -f "$DTACH_SOCKET" "$JAVA_PID_FILE"
 }
 
 terminate() {
@@ -207,35 +238,9 @@ terminate() {
 trap terminate SIGTERM SIGINT SIGQUIT
 trap cleanup EXIT
 
-# Run Java server with multiplexed I/O:
-# - stdin comes from FIFO (which gets input from both docker stdin and PTY)
-# - stdout/stderr goes to console (docker logs) AND optionally to PTY (if clients connected)
-# Using process substitution to prevent PTY writes from blocking
-java ${EXTRA_JVM_ARGS} -jar "${SERVER_JAR_PATH}" \
-    --assets "${ASSETS_PATH}" \
-    --bind "${HYTALE_BIND}" \
-    --auth-mode "${HYTALE_AUTH_MODE}" \
-    --transport "${HYTALE_TRANSPORT}" \
-    --backup-frequency "${HYTALE_BACKUP_FREQUENCY}" \
-    --backup-max-count "${HYTALE_BACKUP_MAX_COUNT}" \
-    --universe "${HYTALE_UNIVERSE}" \
-    "${BOOT_COMMANDS[@]}" \
-    ${HYTALE_EXTRA_ARGS} \
-    < "$STDIN_FIFO" \
-    > >(tee >(cat > /tmp/hytale-pty 2>/dev/null || true)) 2>&1 &
-
-# Capture the real Java PID (pipeline removed so signals reach the server)
-JAVA_PID=$!
-
-# Wait for Java process to exit
-wait $JAVA_PID
+wait "$DTACH_SERVER_PID"
 EXIT_CODE=$?
 
 echo "Hytale server stopped with exit code $EXIT_CODE"
 
-# Kill all background processes explicitly before exit
-kill $SOCAT_PID $PTY_READER_PID $STDIN_CAT_PID $DUMMY_NC_PID 2>/dev/null || true
-kill $(jobs -p) 2>/dev/null || true
-
-# Exit immediately (cleanup will be called via EXIT trap)
 exit $EXIT_CODE

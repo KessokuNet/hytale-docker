@@ -20,7 +20,7 @@ ENV HYTALE_PATCHLINE=release \
     CONSOLE_PORT=5521
 
 ADD https://downloader.hytale.com/hytale-downloader.zip /tmp/hytale-downloader.zip
-RUN microdnf install -y unzip socat && microdnf clean all
+RUN microdnf install -y unzip socat dtach && microdnf clean all
 
 
 # First we download the Hytale downloader binaries
