@@ -8,9 +8,9 @@ services:
     volumes:
       - ./data:/data
 
-    attach: true
-    stdin_open: true
-    tty: true
+    # attach: true
+    # stdin_open: true
+    # tty: true
     ports:
       - "5520:5520/udp"
       # Do NOT expose this port to untrusted networks, it has no authentication or encryption

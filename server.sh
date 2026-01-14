@@ -153,6 +153,10 @@ SOCAT_PID=$!
 # Give socat time to create the PTY
 sleep 1
 
+# Start a dummy nc connection to keep the PTY alive
+nc localhost ${CONSOLE_PORT} > /dev/null 2>&1 &
+DUMMY_NC_PID=$!
+
 # Bridge PTY input to stdin FIFO in background
 cat /tmp/hytale-pty > "$STDIN_FIFO" &
 PTY_READER_PID=$!
@@ -214,7 +218,7 @@ EXIT_CODE=$?
 echo "Hytale server stopped with exit code $EXIT_CODE"
 
 # Kill all background processes explicitly before exit
-kill $SOCAT_PID $PTY_READER_PID $STDIN_CAT_PID 2>/dev/null || true
+kill $SOCAT_PID $PTY_READER_PID $STDIN_CAT_PID $DUMMY_NC_PID 2>/dev/null || true
 kill $(jobs -p) 2>/dev/null || true
 
 # Exit immediately (cleanup will be called via EXIT trap)
