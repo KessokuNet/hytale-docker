@@ -166,38 +166,51 @@ cat < /dev/stdin > "$STDIN_FIFO" &
 STDIN_CAT_PID=$!
 
 # Cleanup function
+CLEANED_UP=0
+
 cleanup() {
+    # Avoid double cleanup when multiple traps fire
+    if [ "$CLEANED_UP" -eq 1 ]; then
+        return
+    fi
+    CLEANED_UP=1
+
     echo "Shutting down Hytale server gracefully..."
     if [ -n "$JAVA_PID" ] && kill -0 $JAVA_PID 2>/dev/null; then
-        # Send SIGINT to Java process for graceful shutdown
-        kill -INT $JAVA_PID
-        # Wait for server to shut down (with timeout)
-        for i in {1..30}; do
+        # Prefer SIGTERM so Docker stop aligns with JVM expectations
+        kill -TERM $JAVA_PID
+        for i in {1..10}; do
             if ! kill -0 $JAVA_PID 2>/dev/null; then
                 break
             fi
             sleep 1
         done
-        # Force kill if still running
+        # Last resort: SIGKILL to avoid lingering container
         if kill -0 $JAVA_PID 2>/dev/null; then
             echo "Server did not shut down gracefully, forcing termination..."
-            kill -9 $JAVA_PID 2>/dev/null
+            kill -KILL $JAVA_PID 2>/dev/null
         fi
     fi
+
     # Kill all processes in this process group
     kill -- -$$ 2>/dev/null || true
-    # Clean up files
     rm -f /tmp/hytale-pty "$STDIN_FIFO"
 }
 
-# Trap termination signals AND exit
-trap cleanup SIGTERM SIGINT SIGQUIT EXIT
+terminate() {
+    cleanup
+    # Exit immediately so Docker/K8s stop does not hang in wait
+    exit 0
+}
+
+# Trap termination signals to run cleanup then exit; keep EXIT for normal path
+trap terminate SIGTERM SIGINT SIGQUIT
+trap cleanup EXIT
 
 # Run Java server with multiplexed I/O:
 # - stdin comes from FIFO (which gets input from both docker stdin and PTY)
 # - stdout/stderr goes to console (docker logs) AND optionally to PTY (if clients connected)
 # Using process substitution to prevent PTY writes from blocking
-cat "$STDIN_FIFO" | \
 java ${EXTRA_JVM_ARGS} -jar "${SERVER_JAR_PATH}" \
     --assets "${ASSETS_PATH}" \
     --bind "${HYTALE_BIND}" \
@@ -207,8 +220,11 @@ java ${EXTRA_JVM_ARGS} -jar "${SERVER_JAR_PATH}" \
     --backup-max-count "${HYTALE_BACKUP_MAX_COUNT}" \
     --universe "${HYTALE_UNIVERSE}" \
     "${BOOT_COMMANDS[@]}" \
-    ${HYTALE_EXTRA_ARGS} 2>&1 | tee >(cat > /tmp/hytale-pty 2>/dev/null || true) &
+    ${HYTALE_EXTRA_ARGS} \
+    < "$STDIN_FIFO" \
+    > >(tee >(cat > /tmp/hytale-pty 2>/dev/null || true)) 2>&1 &
 
+# Capture the real Java PID (pipeline removed so signals reach the server)
 JAVA_PID=$!
 
 # Wait for Java process to exit
