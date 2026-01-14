@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hytale
+spec:
+  selector:
+    matchLabels:
+      app: hytale
+  serviceName: hytale
+  template:
+    metadata:
+      labels:
+        app: hytale
+    spec:
+      containers:
+        - name: hytale
+          image: ghcr.io/kessokunet/hytale-server:latest
+          ports:
+            - containerPort: 5520
+              name: quic
+              protocol: UDP
+            - containerPort: 5521
+              name: console
+              protocol: TCP
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hytale
+spec:
+  selector:
+    app: hytale
+  ports:
+  - port: 5520
+    targetPort: 5520
+    name: quic
+
+  # Uncomment this section to expose the console port, use with caution!
+  # - port: 5521
+  #   targetPort: 5521
+  #   name: console

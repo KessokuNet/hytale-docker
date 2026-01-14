@@ -1,0 +1,19 @@
+services:
+  hytale:
+    image: ghcr.io/kessokunet/hytale-server:latest
+
+    build:
+      context: .
+      dockerfile: Containerfile
+    volumes:
+      - ./data:/data
+
+    attach: true
+    stdin_open: true
+    tty: true
+    ports:
+      - "5520:5520/udp"
+      # Do NOT expose this port to untrusted networks, it has no authentication or encryption
+      # Meant for dev/test use or within trusted/private networks only
+      # use caution when exposing this port!
+      - "5521:5521/tcp"
