@@ -15,6 +15,9 @@ spec:
       containers:
         - name: hytale
           image: ghcr.io/kessokunet/hytale-server:latest
+          # For proper console logging and interaction
+          tty: true
+          stdin: true
           ports:
             - containerPort: 5520
               name: quic
