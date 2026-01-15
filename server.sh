@@ -151,12 +151,24 @@ mkfifo "$STDIN_FIFO"
 socat -d -d PTY,link=/tmp/hytale-pty,raw,echo=0 TCP-LISTEN:${CONSOLE_PORT},reuseaddr,fork &
 SOCAT_PID=$!
 
-# Give socat time to create the PTY
-sleep 1
+# Wait for socat to create the PTY and start listening to avoid racing the dummy nc
+SOCAT_READY=0
+for _ in {1..20}; do
+    if [ -e /tmp/hytale-pty ] && nc -z -w1 localhost ${CONSOLE_PORT} 2>/dev/null; then
+        SOCAT_READY=1
+        break
+    fi
+    sleep 0.25
+done
 
-# Start a dummy nc connection to keep the PTY alive
-nc localhost ${CONSOLE_PORT} > /dev/null 2>&1 &
-DUMMY_NC_PID=$!
+# Start a dummy nc connection to keep the PTY alive once socat is ready
+if [ "$SOCAT_READY" -eq 1 ]; then
+    nc localhost ${CONSOLE_PORT} > /dev/null 2>&1 &
+    DUMMY_NC_PID=$!
+else
+    echo "Warning: socat PTY not ready; dummy nc not started"
+    DUMMY_NC_PID=
+fi
 
 # Bridge PTY input to stdin FIFO in background
 cat /tmp/hytale-pty > "$STDIN_FIFO" &
