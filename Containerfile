@@ -20,13 +20,15 @@ ENV HYTALE_PATCHLINE=release \
     CONSOLE_PORT=5521
 
 ADD https://downloader.hytale.com/hytale-downloader.zip /tmp/hytale-downloader.zip
-RUN microdnf install -y unzip socat && microdnf clean all
+RUN --mount=type=cache,target=/var/cache \
+ microdnf install -y unzip socat numactl-libs && microdnf clean all
 
 
 # First we download the Hytale downloader binaries
 # The game itself is gated behind DRM so we need to use their official downloader
-RUN unzip /tmp/hytale-downloader.zip -d /tmp/hytale-downloader
-RUN mv /tmp/hytale-downloader/hytale-downloader-linux-amd64 /usr/bin/hytale-downloader
+RUN unzip /tmp/hytale-downloader.zip -d /tmp/hytale-downloader && \
+    mv /tmp/hytale-downloader/hytale-downloader-linux-amd64 /usr/bin/hytale-downloader && \
+    rm -rf /tmp/hytale-downloader /tmp/hytale-downloader.zip
 RUN chmod +x /usr/bin/hytale-downloader
 
 
