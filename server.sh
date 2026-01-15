@@ -162,12 +162,20 @@ for _ in {1..40}; do
 done
 
 # Start a dummy nc connection to keep the PTY alive once socat is ready
+# Retry a few times in case socat takes an extra moment after the readiness check
+DUMMY_NC_PID=""
 if [ "$SOCAT_READY" -eq 1 ]; then
-    nc 127.0.0.1 ${CONSOLE_PORT} > /dev/null 2>&1 &
-    DUMMY_NC_PID=$!
+    for _ in {1..3}; do
+        nc 127.0.0.1 ${CONSOLE_PORT} > /dev/null 2>&1 &
+        DUMMY_NC_PID=$!
+        sleep 0.25
+        if kill -0 "$DUMMY_NC_PID" 2>/dev/null; then
+            break
+        fi
+        DUMMY_NC_PID=""
+    done
 else
     echo "Warning: socat PTY not ready; dummy nc not started"
-    DUMMY_NC_PID=
 fi
 
 # Bridge PTY input to stdin FIFO in background
