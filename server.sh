@@ -53,7 +53,13 @@ downloader() {
 }
 
 print_latest_game_version() {
-    downloader -print-version
+    local version
+    version=$(downloader -print-version)
+    if [ -z "$version" ]; then
+        echo "Warning: Failed to retrieve latest game version" >&2
+        return 1
+    fi
+    echo "$version"
 }
 
 get_version_date() {
