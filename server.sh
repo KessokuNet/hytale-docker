@@ -14,6 +14,7 @@
 : ${HYTALE_EXTRA_ARGS:=""}
 : ${HYTALE_PERSIST_AUTH:="true"}
 : ${HYTALE_BOOT_CMDS:=""}
+: ${HYTALE_LOAD_AOT_CACHE:="true"}
 
 BASE_STARTUP_CMDS=()
 DOWNLOAD_PATH="/data/bin"
@@ -131,6 +132,16 @@ fi
 
 SERVER_JAR_PATH="${DOWNLOAD_PATH}/${CURRENT_VERSION}/Server/HytaleServer.jar"
 ASSETS_PATH="${DOWNLOAD_PATH}/${CURRENT_VERSION}/Assets.zip"
+AOT_CACHE_PATH="${DOWNLOAD_PATH}/${CURRENT_VERSION}/Server/HytaleServer.aot"
+
+# Configure AOT cache loading if enabled
+AOT_ARGS=""
+if [ "${HYTALE_LOAD_AOT_CACHE}" = "true" ] && [ -f "${AOT_CACHE_PATH}" ]; then
+    echo "AOT cache found at ${AOT_CACHE_PATH}, enabling AOT cache loading..."
+    AOT_ARGS="-XX:AOTCache=${AOT_CACHE_PATH}"
+elif [ "${HYTALE_LOAD_AOT_CACHE}" = "true" ]; then
+    echo "Warning: AOT cache loading enabled but file not found at ${AOT_CACHE_PATH}"
+fi
 
 echo
 
@@ -238,7 +249,7 @@ trap cleanup EXIT
 # - stdin comes from FIFO (which gets input from both docker stdin and PTY)
 # - stdout/stderr goes to console (docker logs) AND optionally to PTY (if clients connected)
 # Using process substitution to prevent PTY writes from blocking
-java ${EXTRA_JVM_ARGS} -jar "${SERVER_JAR_PATH}" \
+java ${AOT_ARGS} ${EXTRA_JVM_ARGS} -jar "${SERVER_JAR_PATH}" \
     --assets "${ASSETS_PATH}" \
     --bind "${HYTALE_BIND}" \
     --auth-mode "${HYTALE_AUTH_MODE}" \
