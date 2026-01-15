@@ -21,7 +21,7 @@ ENV HYTALE_PATCHLINE=release \
 
 ADD https://downloader.hytale.com/hytale-downloader.zip /tmp/hytale-downloader.zip
 RUN --mount=type=cache,target=/var/cache \
- microdnf install -y unzip socat numactl-libs && microdnf clean all
+ microdnf install -y unzip socat nc nano vi numactl-libs && microdnf clean all
 
 
 # First we download the Hytale downloader binaries
